@@ -1,0 +1,1 @@
+char* GenerateCode(char* bitstream);
