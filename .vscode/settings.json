@@ -2,6 +2,7 @@
     "files.associations": {
         "stdbool.h": "c",
         "precompute.h": "c",
-        "include.h": "c"
+        "include.h": "c",
+        "generator.h": "c"
     }
 }
