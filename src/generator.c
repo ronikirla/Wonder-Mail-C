@@ -5,7 +5,6 @@
 #define BITSTREAM_NO_CHECKSUM_LEN 138
 #define BITSTREAM_FULL_LEN 170
 #define NUM_BLOCKS 17
-#define CODE_LEN 34
 
 uint32_t CalculateChecksum(char* bitstream) {
     // Start with 0xFFFFFFFF.
@@ -164,11 +163,14 @@ uint8_t byte_swap_EU[] = {
 };
 
 void GenerateCode(char* bitstream, char* dest, enum region region) {
+    char bitstream_cpy[BITSTREAM_FULL_LEN + 1] = "";
+    strncat(bitstream_cpy, bitstream, BITSTREAM_FULL_LEN);
+
     // Encrypt the code.
-    EncryptBitStream(bitstream);
+    EncryptBitStream(bitstream_cpy);
 
     // Bitpack it.
-    BitsToChars(bitstream, dest); 
+    BitsToChars(bitstream_cpy, dest); 
 
     // Scramble it.
     uint8_t* byte_swap;
