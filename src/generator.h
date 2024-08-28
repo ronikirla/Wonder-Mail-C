@@ -10,6 +10,8 @@ enum region {
     REGION_EU = 2
 };
 
-void GenerateCode(char* bitstream, char* dest, enum region region);
+bool GenerateCode(char* bitstream, char* dest, enum region region, uint32_t checksum, bool checksum_verify);
 
 void NumToBits(uint32_t num, int output_size, char* dest);
+
+extern const char* bit_values;

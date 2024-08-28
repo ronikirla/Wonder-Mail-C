@@ -1,6 +1,9 @@
 #include "generator.h"
 #include "include.h"
 #include "optimize.h"
+#include "valid_lists.h"
+
+#define MAX_ASCII 128 
 
 #define POS_NULL_BITS       0
 #define POS_SPECIAL_FLOOR   8
@@ -9,7 +12,19 @@
 #define POS_REWARD_TYPE     11
 #define POS_TARGET_ITEM     83
 #define POS_TARGET          104
-#define POS_CLIENT          115    
+#define POS_CLIENT          115   
+
+#define POS_NULL_BITS       0
+#define POS_FLAVOR_TEXT_MSB 32
+#define POS_FLAVOR_TEXT_LSB 55
+#define POS_TARGET          104
+#define POS_CLIENT          115
+
+#define BITS_NB_SF              16
+#define BITS_FLAVOR_TEXT_MSB    3
+#define BITS_FLAVOR_TEXT_FULL   24
+#define BITS_FLAVOR_TEXT_LSB    1
+#define BITS_TARGET_CLIENT      11
 
 struct evaluation {
     int repeats;
@@ -125,7 +140,7 @@ struct evaluation EvaluateCode(char* code, int best_c) {
     return (struct evaluation) { c, d };
 }
 
-void* SetUnks(char* code, enum region region, enum mission_type mission_type) {
+/* not needed if we can just set everything perfectly void* SetUnks(char* code, enum region region, enum mission_type mission_type) {
     int unks[CODE_LEN];
     int unks_len = 0;
 
@@ -134,36 +149,87 @@ void* SetUnks(char* code, enum region region, enum mission_type mission_type) {
     for (int i = 0; i < unks_len; i++) {
         code[unks[i]] = '?';
     }
-}
+}*/
 
 char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_type mission_type) {
+    // Initialize the reverse lookup table with -1 (indicating character not found)
+    int reverse_lookup[MAX_ASCII];
+    for (int i = 0; i < MAX_ASCII; i++) {
+        reverse_lookup[i] = -1;
+    }
+
+    // Fill the reverse lookup table with indices of characters in bit_values
+    for (int i = 0; i < strlen(bit_values); i++) {
+        reverse_lookup[(int) bit_values[i]] = i;
+    }
+
+
     char* best_code = malloc(sizeof (char[CODE_LEN + 1]));
     char current_code[CODE_LEN + 1] = "";
 
     struct evaluation best_evaluation = {0, FLT_MAX};
 
-    for (int i = 0; i < 0xFFFFFF; i++) {
-        for (int j = 0; j < 0x1; j++) {
-            // dont forget to loop through the checksums
+    // Performance critical code so indent level billion is acceptable COPIUM
+    switch (mission_type) {
+        case MISSION_TYPE_NOMRAL:
+            int c = 0;
+            for (int client_idx = 0; client_idx < CLIENTS_LEN; client_idx++) {
+                printf("Client: %d / %d\n", client_idx, CLIENTS_LEN);
+                for (int flavor_text_msb = 0; flavor_text_msb < 8; flavor_text_msb++) {
+                    for (int flavor_text_lsb = 0; flavor_text_lsb < 2; flavor_text_lsb++) {
+                        printf("%d\n", c);
+                        for (int nb_sf = 0; nb_sf <= 0xFFFF; nb_sf++) {
+                            for (uint32_t checksum = 0; checksum <= 0xFF; checksum++) {
+                                c++;
+                                NumToBits(clients[client_idx], BITS_TARGET_CLIENT, bitstream + POS_TARGET);
+                                NumToBits(clients[client_idx], BITS_TARGET_CLIENT, bitstream + POS_CLIENT);
+                                NumToBits(flavor_text_msb, BITS_FLAVOR_TEXT_MSB, bitstream + POS_FLAVOR_TEXT_MSB);
+                                NumToBits(flavor_text_lsb, BITS_FLAVOR_TEXT_LSB, bitstream + POS_FLAVOR_TEXT_LSB);
+                                NumToBits(nb_sf, BITS_NB_SF, bitstream + POS_NULL_BITS);
 
-            // Flavor text
-            NumToBits(i, 24, bitstream + POS_FLAVOR_TEXT);
+                                GenerateCode(bitstream, current_code, region, checksum, false);
+                                // Switch case region
+                                int characters_to_change[] = {31, 21, 26, 2};
+                                int neighbors_to_copy[] = {32, 22, 27, 1};
+                                for (int i = 0; i < 4; i++) {
+                                    int character_to_change = characters_to_change[i];
+                                    int neighbor_to_copy = neighbors_to_copy[i];
 
-            // Null bits
-            NumToBits(j, 8, bitstream + POS_NULL_BITS);
+                                    int offset = 5 * (1 + i);
+                                    char* bit_ptr = bitstream + POS_FLAVOR_TEXT_LSB - offset;
+                                    char substring[5 + 1] = "";
+                                    strncpy(substring, bit_ptr, 5);
+                                    int num = strtol(substring, NULL, 2);
 
-            GenerateCode(bitstream, current_code, region);
+                                    int encrypted_num = reverse_lookup[current_code[character_to_change]];
+                                    int encryption_value = encrypted_num - num;
 
-            struct evaluation result = EvaluateCode(current_code, best_evaluation.repeats);
-            if  (result.repeats > best_evaluation.repeats || 
-                (result.repeats == best_evaluation.repeats &&
-                    result.distance < best_evaluation.repeats))
-            {
-                strcpy(best_code, current_code);
-                printf("%s\n", bitstream);
-                best_evaluation = result;
+                                    int target_num = reverse_lookup[current_code[neighbor_to_copy]];
+                                    int target_num_decrypted = (target_num - encryption_value + 32) % 32;
+
+                                    NumToBits(target_num_decrypted, 5, bit_ptr);
+                                }
+
+                                if (!GenerateCode(bitstream, current_code, region, checksum, true)) {
+                                    continue;
+                                }
+
+                                struct evaluation result = EvaluateCode(current_code, best_evaluation.repeats);
+                                if  (result.repeats > best_evaluation.repeats || 
+                                    (result.repeats == best_evaluation.repeats &&
+                                        result.distance < best_evaluation.repeats))
+                                {
+                                    strcpy(best_code, current_code);
+                                    printf("%s\n", bitstream);
+                                    printf("%s\n", current_code);
+                                    best_evaluation = result;
+                                }
+                            }
+                        }
+                    }
+                }
             }
-        }
+            break;
     }
 
     return best_code;

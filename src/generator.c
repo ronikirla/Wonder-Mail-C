@@ -48,7 +48,17 @@ void NumToBits(uint32_t num, int output_size, char* dest) {
     }
 }
 
-void EncryptBitStream(char* bitstream) {
+bool EncryptBitStream(char* bitstream, int checksum_override, bool checksum_verify) {
+    uint32_t checksum;
+    if (checksum_verify) {
+        checksum = CalculateChecksum(bitstream);
+        if (checksum % 256 != checksum_override) {
+            return false;
+        }
+    } else {
+        checksum = checksum_override;
+    }
+
     char* bit_ptr = bitstream + BITSTREAM_NO_CHECKSUM_LEN;
 
     // This will contain the 8-bit blocks as numbers (0-255), each representing one byte.
@@ -66,8 +76,6 @@ void EncryptBitStream(char* bitstream) {
     char substring[10 + 1];
     strncpy(substring, bit_ptr, 10);
     blocks[NUM_BLOCKS - 1] = strtol(substring, NULL, 2);
-
-    uint32_t checksum = CalculateChecksum(bitstream);
 
     // Get our encryption entries.
     uint8_t* entries = precompute.encryption_tables.rows[checksum % 256];
@@ -111,10 +119,12 @@ void EncryptBitStream(char* bitstream) {
     
     // Append the checksum
     NumToBits(checksum, 32, encryption_ptr);
+    return true;
 }
 
+const char* bit_values = "&67NPR89F0+#STXY45MCHJ-K12=%3Q@W";
+
 void BitsToChars(char* bitstream, char* dest) {
-    const char* bit_values = "&67NPR89F0+#STXY45MCHJ-K12=%3Q@W";
     for (int i = 0; i < CODE_LEN; i++) {
         char substring[5 + 1] = "";
         strncpy(substring, bitstream + (CODE_LEN - i - 1) * 5, 5);
@@ -162,12 +172,14 @@ uint8_t byte_swap_EU[] = {
     0x1D, 0x11
 };
 
-void GenerateCode(char* bitstream, char* dest, enum region region) {
+bool GenerateCode(char* bitstream, char* dest, enum region region, uint32_t checksum, bool checksum_verify) {
     char bitstream_cpy[BITSTREAM_FULL_LEN + 1] = "";
     strncat(bitstream_cpy, bitstream, BITSTREAM_FULL_LEN);
 
     // Encrypt the code.
-    EncryptBitStream(bitstream_cpy);
+    if (!EncryptBitStream(bitstream_cpy, checksum, checksum_verify)) {
+        return false;
+    };
 
     // Bitpack it.
     BitsToChars(bitstream_cpy, dest); 
@@ -189,4 +201,5 @@ void GenerateCode(char* bitstream, char* dest, enum region region) {
     }
 
     ScrambleString(dest, byte_swap);
+    return true;
 }
