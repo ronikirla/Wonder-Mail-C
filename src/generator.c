@@ -72,7 +72,7 @@ bool EncryptBitStream(char* bitstream, int checksum_override, bool checksum_veri
         int data = strtol(substring, NULL, 2);
         blocks[i] = data;
     }
-    bit_ptr -= 2;
+    bit_ptr -= 10;
     char substring[10 + 1];
     strncpy(substring, bit_ptr, 10);
     blocks[NUM_BLOCKS - 1] = strtol(substring, NULL, 2);
@@ -94,9 +94,8 @@ bool EncryptBitStream(char* bitstream, int checksum_override, bool checksum_veri
         int input_byte = blocks[i];
 
         // Add the number in the encryption entry to the input byte.
-        bool last = i == NUM_BLOCKS - 1;
-        int mask = last ? 0x3FF : 0xFF;
-        int result = (input_byte + entries[enc_idx]) & mask;
+        int result = (input_byte + entries[enc_idx]) & 0xFF;
+        result += input_byte & 0x300;
         // printf("pos %d, value %d, encbyte %d, result is %d\n", i, input_byte, entries[enc_idx], result);
 
         // Update the data in the block.
