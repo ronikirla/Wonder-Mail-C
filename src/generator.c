@@ -3,7 +3,6 @@
 #include "generator.h"
 
 #define BITSTREAM_NO_CHECKSUM_LEN 138
-#define BITSTREAM_FULL_LEN 170
 #define NUM_BLOCKS 17
 
 uint32_t CalculateChecksum(char* bitstream) {

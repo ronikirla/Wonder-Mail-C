@@ -131,16 +131,28 @@ struct evaluation EvaluateCode(char* code, int best_c) {
     return (struct evaluation) { c, d };
 }
 
-/* not needed if we can just set everything perfectly void* SetUnks(char* code, enum region region, enum mission_type mission_type) {
-    int unks[CODE_LEN];
-    int unks_len = 0;
+struct code_details {
+    char code[CODE_LEN + 1];
+    struct evaluation eval;
+};
 
-    
-
-    for (int i = 0; i < unks_len; i++) {
-        code[unks[i]] = '?';
+int compare_codes(const void* a, const void* b) {
+    const struct code_details* aa = a;
+    const struct code_details* bb = b;
+    if (aa->eval.repeats > bb->eval.repeats) {
+        return -1;
+    } else if (aa->eval.repeats < bb->eval.repeats) {
+        return 1;
+    } else {
+        if (aa->eval.distance < bb->eval.distance) {
+            return -1;
+        } else if (aa->eval.distance > bb->eval.distance) {
+            return 1;
+        } else {
+            return 0;
+        }
     }
-}*/
+}
 
 char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_type mission_type) {
     // Initialize the reverse lookup table with -1 (indicating character not found)
@@ -154,27 +166,28 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
         reverse_lookup[(int) bit_values[i]] = i;
     }
 
-
-    char* best_code = malloc(sizeof (char[CODE_LEN + 1]));
-    char current_code[CODE_LEN + 1] = "";
-
-    struct evaluation best_evaluation = {0, FLT_MAX};
+    struct code_details best_codes[CLIENTS_LEN];
 
     // Performance critical code so indent level billion is acceptable COPIUM
     switch (mission_type) {
         case MISSION_TYPE_NOMRAL:
+            #pragma omp parallel for
             for (int client_idx = 0; client_idx < CLIENTS_LEN; client_idx++) {
-                printf("Client: %d / %d\n", client_idx, CLIENTS_LEN);
-                NumToBits(clients[client_idx], BITS_TARGET_CLIENT, bitstream + POS_TARGET);
-                NumToBits(clients[client_idx], BITS_TARGET_CLIENT, bitstream + POS_CLIENT);
+                char best_code[CODE_LEN + 1] = "";
+                char current_code[CODE_LEN + 1] = "";
+                char current_bitstream[BITSTREAM_FULL_LEN + 1] = "";
+                strncat(current_bitstream, bitstream, BITSTREAM_FULL_LEN);
+                struct evaluation best_evaluation = {0, FLT_MAX};
+                NumToBits(clients[client_idx], BITS_TARGET_CLIENT, current_bitstream + POS_TARGET);
+                NumToBits(clients[client_idx], BITS_TARGET_CLIENT, current_bitstream + POS_CLIENT);
                 for (int flavor_text_msb = 0; flavor_text_msb < 8; flavor_text_msb++) {
-                    NumToBits(flavor_text_msb, BITS_FLAVOR_TEXT_MSB, bitstream + POS_FLAVOR_TEXT_MSB);
+                    NumToBits(flavor_text_msb, BITS_FLAVOR_TEXT_MSB, current_bitstream + POS_FLAVOR_TEXT_MSB);
                     for (int flavor_text_lsb = 0; flavor_text_lsb < 2; flavor_text_lsb++) {
-                        NumToBits(flavor_text_lsb, BITS_FLAVOR_TEXT_LSB, bitstream + POS_FLAVOR_TEXT_LSB);
+                        NumToBits(flavor_text_lsb, BITS_FLAVOR_TEXT_LSB, current_bitstream + POS_FLAVOR_TEXT_LSB);
                         for (int nb_sf = 0; nb_sf <= 0x7FF; nb_sf++) {
-                            NumToBits(nb_sf, BITS_NB_SF, bitstream + POS_NB_SF);
+                            NumToBits(nb_sf, BITS_NB_SF, current_bitstream + POS_NB_SF);
                             for (uint32_t checksum = 0; checksum <= 0xFF; checksum++) {
-                                GenerateCode(bitstream, current_code, region, checksum, false);
+                                GenerateCode(current_bitstream, current_code, region, checksum, false);
                                 // Switch case region
                                 int characters_to_change[] = {31, 21, 26, 2, 17};
                                 int neighbors_to_copy[] = {32, 22, 27, 1, 18};
@@ -189,7 +202,7 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
                                     int character_to_change = characters_to_change[i];
                                     int neighbor_to_copy = neighbors_to_copy[i];
 
-                                    char* bit_ptr = bitstream + offsets[i];
+                                    char* bit_ptr = current_bitstream + offsets[i];
                                     char substring[5 + 1] = "";
                                     strncpy(substring, bit_ptr, 5);
                                     int num = strtol(substring, NULL, 2);
@@ -203,7 +216,7 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
                                     NumToBits(target_num_decrypted, 5, bit_ptr);
                                 }
 
-                                if (!GenerateCode(bitstream, current_code, region, checksum, true)) {
+                                if (!GenerateCode(current_bitstream, current_code, region, checksum, true)) {
                                     continue;
                                 }
 
@@ -213,17 +226,20 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
                                         result.distance < best_evaluation.repeats))
                                 {
                                     strcpy(best_code, current_code);
-                                    printf("%s\n", bitstream);
-                                    printf("%s\n", current_code);
                                     best_evaluation = result;
                                 }
                             }
                         }
                     }
                 }
+                printf("Client: %d / %d: %s\n", client_idx, CLIENTS_LEN, best_code);
+                strcpy(best_codes[client_idx].code, best_code);
+                best_codes[client_idx].eval = best_evaluation;
             }
             break;
     }
-
-    return best_code;
+    qsort(best_codes, CLIENTS_LEN, sizeof(struct code_details), compare_codes);
+    char* final_code = malloc(sizeof (char[CODE_LEN + 1]));
+    strncpy(final_code, best_codes[0].code, CODE_LEN);
+    return final_code;
 }

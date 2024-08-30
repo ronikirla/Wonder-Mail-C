@@ -3,6 +3,7 @@
 #include "include.h"
 
 #define CODE_LEN 34
+#define BITSTREAM_FULL_LEN 170
 
 enum region {
     REGION_JP = 0,
