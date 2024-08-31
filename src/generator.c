@@ -51,7 +51,7 @@ bool EncryptBitStream(char* bitstream, int checksum_override, bool checksum_veri
     uint32_t checksum;
     if (checksum_verify) {
         checksum = CalculateChecksum(bitstream);
-        if (checksum & 0xFF != checksum_override) {
+        if ((checksum & 0xFF) != checksum_override) {
             return false;
         }
     } else {
@@ -63,7 +63,7 @@ bool EncryptBitStream(char* bitstream, int checksum_override, bool checksum_veri
     // This will contain the 8-bit blocks as numbers (0-255), each representing one byte.
     // The checksum byte is NOT included in these blocks.
     // The first block in the array is the last block in the bitstream (we work backwards).
-    uint8_t blocks[NUM_BLOCKS];
+    uint32_t blocks[NUM_BLOCKS];
     for (int i = 0; i < NUM_BLOCKS - 1; i++) {
         bit_ptr -= 8;
         char substring[8 + 1] = "";
@@ -72,7 +72,7 @@ bool EncryptBitStream(char* bitstream, int checksum_override, bool checksum_veri
         blocks[i] = data;
     }
     bit_ptr -= 10;
-    char substring[10 + 1];
+    char substring[10 + 1] = "";
     strncpy(substring, bit_ptr, 10);
     blocks[NUM_BLOCKS - 1] = strtol(substring, NULL, 2);
 

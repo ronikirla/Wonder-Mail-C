@@ -184,9 +184,17 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
                     NumToBits(flavor_text_msb, BITS_FLAVOR_TEXT_MSB, current_bitstream + POS_FLAVOR_TEXT_MSB);
                     for (int flavor_text_lsb = 0; flavor_text_lsb < 2; flavor_text_lsb++) {
                         NumToBits(flavor_text_lsb, BITS_FLAVOR_TEXT_LSB, current_bitstream + POS_FLAVOR_TEXT_LSB);
+                        struct evaluation checksum_evaluations[256];
+                        /*for (uint32_t checksum = 0; checksum <= 0xFF; checksum++) {
+                            checksum_evaluations[checksum].repeats = INT_MAX;
+                            checksum_evaluations[checksum].distance = 0;
+                        }*/
                         for (int nb_sf = 0; nb_sf <= 0x7FF; nb_sf++) {
                             NumToBits(nb_sf, BITS_NB_SF, current_bitstream + POS_NB_SF);
                             for (uint32_t checksum = 0; checksum <= 0xFF; checksum++) {
+                                /*if (checksum_evaluations[checksum].repeats <= best_evaluation.repeats - 2) {
+                                    continue;
+                                }*/
                                 GenerateCode(current_bitstream, current_code, region, checksum, false);
                                 // Switch case region
                                 int characters_to_change[] = {31, 21, 26, 2, 17};
@@ -208,11 +216,17 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
                                     int num = strtol(substring, NULL, 2);
 
                                     int encrypted_num = reverse_lookup[current_code[character_to_change]];
+
                                     int encryption_value = encrypted_num - num;
 
                                     int target_num = reverse_lookup[current_code[neighbor_to_copy]];
-                                    int target_num_decrypted = (target_num - encryption_value + 32) % 32;
-
+                                    int target_num_decrypted;
+                                    if (i == 4) {
+                                        // Handle half encrypted first character
+                                        target_num_decrypted = (target_num & 0x18) | (((target_num & 0x7) - encryption_value + 8) % 8);
+                                    } else {
+                                        target_num_decrypted = (target_num - encryption_value + 32) % 32;
+                                    }
                                     NumToBits(target_num_decrypted, 5, bit_ptr);
                                 }
 
@@ -221,6 +235,7 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
                                 }
 
                                 struct evaluation result = EvaluateCode(current_code, best_evaluation.repeats);
+                                checksum_evaluations[checksum] = result;
                                 if  (result.repeats > best_evaluation.repeats || 
                                     (result.repeats == best_evaluation.repeats &&
                                         result.distance < best_evaluation.repeats))
@@ -232,7 +247,7 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
                         }
                     }
                 }
-                printf("Client: %d / %d: %s\n", client_idx, CLIENTS_LEN, best_code);
+                printf("Client %d / %d: %s (c: %d, d: %f)\n", client_idx + 1, CLIENTS_LEN, best_code, best_evaluation.repeats, best_evaluation.distance);
                 strcpy(best_codes[client_idx].code, best_code);
                 best_codes[client_idx].eval = best_evaluation;
             }

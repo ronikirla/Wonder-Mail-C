@@ -2,7 +2,7 @@
 CC = gcc
 
 # Compiler flags
-CFLAGS = -g -O3 -fopenmp
+CFLAGS = -g -O3 -fopenmp 
 
 # Source files
 SRCS = $(wildcard src/*.c)
