@@ -167,6 +167,7 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
     }
 
     struct code_details best_codes[CLIENTS_LEN];
+    int iterations = 0;
 
     // Performance critical code so indent level billion is acceptable COPIUM
     switch (mission_type) {
@@ -176,6 +177,7 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
                 char best_code[CODE_LEN + 1] = "";
                 char current_code[CODE_LEN + 1] = "";
                 char current_bitstream[BITSTREAM_FULL_LEN + 1] = "";
+                int best_checksum = -1;
                 strncat(current_bitstream, bitstream, BITSTREAM_FULL_LEN);
                 struct evaluation best_evaluation = {0, FLT_MAX};
                 NumToBits(clients[client_idx], BITS_TARGET_CLIENT, current_bitstream + POS_TARGET);
@@ -184,17 +186,16 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
                     NumToBits(flavor_text_msb, BITS_FLAVOR_TEXT_MSB, current_bitstream + POS_FLAVOR_TEXT_MSB);
                     for (int flavor_text_lsb = 0; flavor_text_lsb < 2; flavor_text_lsb++) {
                         NumToBits(flavor_text_lsb, BITS_FLAVOR_TEXT_LSB, current_bitstream + POS_FLAVOR_TEXT_LSB);
-                        struct evaluation checksum_evaluations[256];
-                        /*for (uint32_t checksum = 0; checksum <= 0xFF; checksum++) {
-                            checksum_evaluations[checksum].repeats = INT_MAX;
-                            checksum_evaluations[checksum].distance = 0;
-                        }*/
+                        int checksum_repeats[256];
+                        for (uint32_t checksum = 0; checksum <= 0xFF; checksum++) {
+                            checksum_repeats[checksum] = INT_MAX;
+                        }
                         for (int nb_sf = 0; nb_sf <= 0x7FF; nb_sf++) {
                             NumToBits(nb_sf, BITS_NB_SF, current_bitstream + POS_NB_SF);
                             for (uint32_t checksum = 0; checksum <= 0xFF; checksum++) {
-                                /*if (checksum_evaluations[checksum].repeats <= best_evaluation.repeats - 2) {
+                                if (checksum_repeats[checksum] < 8) {
                                     continue;
-                                }*/
+                                }
                                 GenerateCode(current_bitstream, current_code, region, checksum, false);
                                 // Switch case region
                                 int characters_to_change[] = {31, 21, 26, 2, 17};
@@ -206,6 +207,7 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
                                     POS_FLAVOR_TEXT_LSB - 5 * 4,
                                     0
                                 };
+                                int carry_change = 0;
                                 for (int i = 0; i < 5; i++) {
                                     int character_to_change = characters_to_change[i];
                                     int neighbor_to_copy = neighbors_to_copy[i];
@@ -213,19 +215,50 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
                                     char* bit_ptr = current_bitstream + offsets[i];
                                     char substring[5 + 1] = "";
                                     strncpy(substring, bit_ptr, 5);
-                                    int num = strtol(substring, NULL, 2);
+                                    uint32_t num = strtol(substring, NULL, 2);
 
-                                    int encrypted_num = reverse_lookup[current_code[character_to_change]];
+                                    uint32_t encrypted_num = reverse_lookup[current_code[character_to_change]];
 
-                                    int encryption_value = encrypted_num - num;
+                                    uint32_t encryption_value = (encrypted_num - num + carry_change) % 32;
 
-                                    int target_num = reverse_lookup[current_code[neighbor_to_copy]];
-                                    int target_num_decrypted;
-                                    if (i == 4) {
-                                        // Handle half encrypted first character
-                                        target_num_decrypted = (target_num & 0x18) | (((target_num & 0x7) - encryption_value + 8) % 8);
-                                    } else {
-                                        target_num_decrypted = (target_num - encryption_value + 32) % 32;
+                                    uint32_t target_num = reverse_lookup[current_code[neighbor_to_copy]];
+                                    uint32_t target_num_decrypted;
+
+                                    int carry_before;
+                                    int carry_after;
+                                    switch (i) {
+                                        case 2:
+                                            // This character is divided into two encryption bytes
+                                            uint32_t target_num_msb = target_num >> 3;
+                                            uint32_t target_num_lsb = target_num & 0x7;
+
+                                            uint32_t encryption_value_msb = (((encrypted_num & 0x18) - (num & 0x18)) >> 3) % 4;
+                                            uint32_t encryption_value_lsb = ((encrypted_num & 0x7) - (num & 0x7) + carry_change) % 8;
+
+                                            uint32_t target_num_decrypted_msb = (target_num_msb - encryption_value_msb) % 4;
+                                            uint32_t target_num_decrypted_lsb = (target_num_lsb - encryption_value_lsb) % 8;
+
+                                            target_num_decrypted = (target_num_decrypted_msb << 3) | (target_num_decrypted_lsb);
+
+                                            carry_before = (num >> 3) + encryption_value_msb >= 4;
+                                            carry_after = (target_num_decrypted >> 3) + encryption_value_msb >= 4;
+                                            carry_change = carry_after - carry_before;
+                                            break;
+                                        case 4:
+                                            // Handle half encrypted first character
+                                            target_num_decrypted = (target_num & 0x18) | (((target_num & 0x7) - encryption_value) % 8);
+                                            break;
+                                        default:
+                                            target_num_decrypted = (target_num - encryption_value) % 32;
+                                            // Keep track of whether there's a carry to the next character; affects encryption
+                                            // Only matters when two adjacent characters share an encryption block
+                                            if (i == 1) {
+                                                carry_before = num + encryption_value >= 32;
+                                                carry_after = target_num_decrypted + encryption_value >= 32;
+                                                carry_change = carry_after - carry_before;
+                                            } else {
+                                                carry_change = 0;
+                                            }
                                     }
                                     NumToBits(target_num_decrypted, 5, bit_ptr);
                                 }
@@ -235,19 +268,30 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
                                 }
 
                                 struct evaluation result = EvaluateCode(current_code, best_evaluation.repeats);
-                                checksum_evaluations[checksum] = result;
+
+                                if (result.repeats < 5) {
+                                    printf("DIESOFCRINGE\n");
+                                    exit(EXIT_FAILURE);
+                                }
+
+                                checksum_repeats[checksum] = result.repeats;
                                 if  (result.repeats > best_evaluation.repeats || 
                                     (result.repeats == best_evaluation.repeats &&
                                         result.distance < best_evaluation.repeats))
                                 {
                                     strcpy(best_code, current_code);
                                     best_evaluation = result;
+                                    best_checksum = checksum;
                                 }
                             }
                         }
                     }
                 }
-                printf("Client %d / %d: %s (c: %d, d: %f)\n", client_idx + 1, CLIENTS_LEN, best_code, best_evaluation.repeats, best_evaluation.distance);
+                #pragma omp atomic
+                iterations += 1;
+
+                printf("%3d(%3d) / %3d: %s (c: %2d, d: %5.1f, e: %3d)\n",
+                    iterations, client_idx, CLIENTS_LEN, best_code, best_evaluation.repeats, best_evaluation.distance, best_checksum);
                 strcpy(best_codes[client_idx].code, best_code);
                 best_codes[client_idx].eval = best_evaluation;
             }
