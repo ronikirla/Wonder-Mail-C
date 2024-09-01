@@ -11,7 +11,7 @@
 #define POS_TARGET          104
 #define POS_CLIENT          115
 
-#define BITS_NB_SF              11
+#define BITS_NB_SF              16
 #define BITS_FLAVOR_TEXT_MSB    3
 #define BITS_FLAVOR_TEXT_FULL   24
 #define BITS_FLAVOR_TEXT_LSB    1
@@ -190,10 +190,10 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
                         for (uint32_t checksum = 0; checksum <= 0xFF; checksum++) {
                             checksum_repeats[checksum] = INT_MAX;
                         }
-                        for (int nb_sf = 0; nb_sf <= 0x7FF; nb_sf++) {
-                            NumToBits(nb_sf, BITS_NB_SF, current_bitstream + POS_NB_SF);
+                        for (int nb_sf = 0; nb_sf <= 0xFFFF; nb_sf++) {
+                            NumToBits(nb_sf, BITS_NB_SF, current_bitstream);
                             for (uint32_t checksum = 0; checksum <= 0xFF; checksum++) {
-                                if (checksum_repeats[checksum] < 8) {
+                                if (checksum_repeats[checksum] < 7) {
                                     continue;
                                 }
                                 GenerateCode(current_bitstream, current_code, region, checksum, false);
@@ -208,7 +208,7 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
                                     0
                                 };
                                 int carry_change = 0;
-                                for (int i = 0; i < 5; i++) {
+                                for (int i = 0; i < 4; i++) {
                                     int character_to_change = characters_to_change[i];
                                     int neighbor_to_copy = neighbors_to_copy[i];
 
@@ -269,7 +269,7 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
 
                                 struct evaluation result = EvaluateCode(current_code, best_evaluation.repeats);
 
-                                if (result.repeats < 5) {
+                                if (result.repeats < 4) {
                                     printf("DIESOFCRINGE\n");
                                     exit(EXIT_FAILURE);
                                 }
@@ -299,6 +299,6 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
     }
     qsort(best_codes, CLIENTS_LEN, sizeof(struct code_details), compare_codes);
     char* final_code = malloc(sizeof (char[CODE_LEN + 1]));
-    strncpy(final_code, best_codes[0].code, CODE_LEN);
+    strncpy(final_code, best_codes[0].code, CODE_LEN + 1);
     return final_code;
 }
