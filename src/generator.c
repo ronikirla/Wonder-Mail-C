@@ -47,7 +47,7 @@ void NumToBits(uint32_t num, int output_size, char* dest) {
     }
 }
 
-bool EncryptBitStream(char* bitstream, int checksum_override, bool checksum_verify) {
+bool EncryptBitStream(char* bitstream, uint32_t checksum_override, bool checksum_verify) {
     uint32_t checksum;
     if (checksum_verify) {
         checksum = CalculateChecksum(bitstream);
@@ -85,7 +85,6 @@ bool EncryptBitStream(char* bitstream, int checksum_override, bool checksum_veri
     // Do the encryption.
     int enc_idx = 0;
     for (int i = 0; i < NUM_BLOCKS; i++) {
-        int pos = i * 8;
         if (enc_idx == reset_byte) {
             enc_idx = 0;
         }
@@ -127,7 +126,7 @@ void BitsToChars(char* bitstream, char* dest) {
         char substring[5 + 1] = "";
         strncpy(substring, bitstream + (CODE_LEN - i - 1) * 5, 5);
         uint8_t num = strtol(substring, NULL, 2);
-        if (num >= 0 && num < 32) {
+        if (num < 32) {
             dest[i] = bit_values[num];
         } else {
             fprintf(stderr, "Bad character value: %d", num);

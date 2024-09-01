@@ -3,7 +3,7 @@
 #include "generator.h"
 #include "optimize.h"
 
-int main(int argc, char const *argv[])
+int main(/*int argc, char const *argv[]*/)
 {
     GenCRC32Table();
     GenEncryptionTables();

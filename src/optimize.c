@@ -5,7 +5,6 @@
 
 #define MAX_ASCII 128 
 
-#define POS_NB_SF           5
 #define POS_FLAVOR_TEXT_MSB 32
 #define POS_FLAVOR_TEXT_LSB 55
 #define POS_TARGET          104
@@ -94,7 +93,6 @@ struct coords GetKeyCoords(char key) {
         case '=':
             return (struct coords) {10, 3};
         default:
-            // Return a default value if character is not recognized
             return (struct coords) {-1, -1};
     }
 }
@@ -155,21 +153,28 @@ int compare_codes(const void* a, const void* b) {
 }
 
 char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_type mission_type) {
-    // Initialize the reverse lookup table with -1 (indicating character not found)
+    // Reverse lookup table for finding the bit value of a given character
     int reverse_lookup[MAX_ASCII];
     for (int i = 0; i < MAX_ASCII; i++) {
         reverse_lookup[i] = -1;
     }
 
-    // Fill the reverse lookup table with indices of characters in bit_values
-    for (int i = 0; i < strlen(bit_values); i++) {
+    for (uint32_t i = 0; i < strlen(bit_values); i++) {
         reverse_lookup[(int) bit_values[i]] = i;
     }
 
     struct code_details best_codes[CLIENTS_LEN];
     int iterations = 0;
 
-    // Performance critical code so indent level billion is acceptable COPIUM
+    // First brute force parts of the code, including all the bits that don't make 
+    // up full characters by themselves (since it's easier). Then in the innermost loop we
+    // assume an encryption key and manually set the bits to values that when encrypted end up as the same
+    // character as the neighbor. The encryption key assumption only has a 1/256 chance of being
+    // correct so the brute force part is important to get more hits. Furthermore, the more brute force
+    // we apply the better chances we have to get a high number of repeats from the checksum characters.
+    
+    // Since the brute force is costly we optimize by running the loop in parallel and skipping over encryption
+    // keys that yield poor results. Being too aggressive with this can result in good codes being skipped.
     switch (mission_type) {
         case MISSION_TYPE_NOMRAL:
             #pragma omp parallel for
@@ -217,48 +222,42 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
                                     strncpy(substring, bit_ptr, 5);
                                     uint32_t num = strtol(substring, NULL, 2);
 
-                                    uint32_t encrypted_num = reverse_lookup[current_code[character_to_change]];
+                                    uint32_t encrypted_num = reverse_lookup[(int) current_code[character_to_change]];
 
                                     uint32_t encryption_value = (encrypted_num - num + carry_change) % 32;
 
-                                    uint32_t target_num = reverse_lookup[current_code[neighbor_to_copy]];
+                                    uint32_t target_num = reverse_lookup[(int) current_code[neighbor_to_copy]];
                                     uint32_t target_num_decrypted;
 
                                     int carry_before;
                                     int carry_after;
-                                    switch (i) {
-                                        case 2:
-                                            // This character is divided into two encryption bytes
-                                            uint32_t target_num_msb = target_num >> 3;
-                                            uint32_t target_num_lsb = target_num & 0x7;
+                                    if (i == 2) {
+                                        // This character is divided into two encryption bytes
+                                        uint32_t target_num_msb = target_num >> 3;
+                                        uint32_t target_num_lsb = target_num & 0x7;
 
-                                            uint32_t encryption_value_msb = (((encrypted_num & 0x18) - (num & 0x18)) >> 3) % 4;
-                                            uint32_t encryption_value_lsb = ((encrypted_num & 0x7) - (num & 0x7) + carry_change) % 8;
+                                        uint32_t encryption_value_msb = (((encrypted_num & 0x18) - (num & 0x18)) >> 3) % 4;
+                                        uint32_t encryption_value_lsb = ((encrypted_num & 0x7) - (num & 0x7) + carry_change) % 8;
 
-                                            uint32_t target_num_decrypted_msb = (target_num_msb - encryption_value_msb) % 4;
-                                            uint32_t target_num_decrypted_lsb = (target_num_lsb - encryption_value_lsb) % 8;
+                                        uint32_t target_num_decrypted_msb = (target_num_msb - encryption_value_msb) % 4;
+                                        uint32_t target_num_decrypted_lsb = (target_num_lsb - encryption_value_lsb) % 8;
 
-                                            target_num_decrypted = (target_num_decrypted_msb << 3) | (target_num_decrypted_lsb);
+                                        target_num_decrypted = (target_num_decrypted_msb << 3) | (target_num_decrypted_lsb);
 
-                                            carry_before = (num >> 3) + encryption_value_msb >= 4;
-                                            carry_after = (target_num_decrypted >> 3) + encryption_value_msb >= 4;
+                                        carry_before = (num >> 3) + encryption_value_msb >= 4;
+                                        carry_after = (target_num_decrypted >> 3) + encryption_value_msb >= 4;
+                                        carry_change = carry_after - carry_before;
+                                    } else {
+                                        target_num_decrypted = (target_num - encryption_value) % 32;
+                                        // Keep track of whether there's a carry to the next character; affects encryption
+                                        // Only matters when two adjacent characters share an encryption block
+                                        if (i == 1) {
+                                            carry_before = num + encryption_value >= 32;
+                                            carry_after = target_num_decrypted + encryption_value >= 32;
                                             carry_change = carry_after - carry_before;
-                                            break;
-                                        case 4:
-                                            // Handle half encrypted first character
-                                            target_num_decrypted = (target_num & 0x18) | (((target_num & 0x7) - encryption_value) % 8);
-                                            break;
-                                        default:
-                                            target_num_decrypted = (target_num - encryption_value) % 32;
-                                            // Keep track of whether there's a carry to the next character; affects encryption
-                                            // Only matters when two adjacent characters share an encryption block
-                                            if (i == 1) {
-                                                carry_before = num + encryption_value >= 32;
-                                                carry_after = target_num_decrypted + encryption_value >= 32;
-                                                carry_change = carry_after - carry_before;
-                                            } else {
-                                                carry_change = 0;
-                                            }
+                                        } else {
+                                            carry_change = 0;
+                                        }
                                     }
                                     NumToBits(target_num_decrypted, 5, bit_ptr);
                                 }
@@ -296,7 +295,9 @@ char* GenerateOptimizedCode(char* bitstream, enum region region, enum mission_ty
                 best_codes[client_idx].eval = best_evaluation;
             }
             break;
+        default:
     }
+    // Sort the results of the iterations run in parallel and return the best one
     qsort(best_codes, CLIENTS_LEN, sizeof(struct code_details), compare_codes);
     char* final_code = malloc(sizeof (char[CODE_LEN + 1]));
     strncpy(final_code, best_codes[0].code, CODE_LEN + 1);
